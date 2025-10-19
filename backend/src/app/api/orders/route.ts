@@ -6,9 +6,9 @@ export const runtime = 'nodejs'
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
 
-export async function POST(req: Request) {
+export async function POST(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const supabase = getSupabaseServer()
-  const body = await req.json().catch(() => null) as { petId?: string, action?: 'heal'|'revive'|'buy' }
+  const body = await _req.json().catch(() => null) as { petId?: string, action?: 'heal'|'revive'|'buy' }
   if (!body?.petId || !body?.action) return NextResponse.json({ error: 'Bad Request' }, { status: 400 })
 
   // Basic pricing (match what you already used in /payments/launch)
