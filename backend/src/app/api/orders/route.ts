@@ -1,29 +1,28 @@
-import type { NextRequest } from 'next/server';
-import { NextResponse } from 'next/server';
-import { createOrderMock, validateAction } from '@/lib/orderService';
-import type { OrderCreateRequest } from '@/types/dto';
+// src/app/api/orders/route.ts
+import { NextResponse } from 'next/server'
+import { getSupabaseServer } from '@/lib/supabaseServer'
 
-export async function POST(req: NextRequest) {
-  const body = (await req.json()) as OrderCreateRequest;
+export const runtime = 'nodejs'
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
 
-  try {
-    // Validate the requested action against current pet state
-    await validateAction(body);
+export async function POST(req: Request) {
+  const supabase = getSupabaseServer()
+  const body = await req.json().catch(() => null) as { petId?: string, action?: 'heal'|'revive'|'buy' }
+  if (!body?.petId || !body?.action) return NextResponse.json({ error: 'Bad Request' }, { status: 400 })
 
-    // TODO: replace with real authenticated user id
-    const userId = 'u1';
+  // Basic pricing (match what you already used in /payments/launch)
+  const price = body.action === 'revive' ? '3.99' : body.action === 'heal' ? '1.99' : '2.99'
 
-    // 1) Create order in DB (status = pending)
-    const order = await createOrderMock(userId, body.petId, body.action);
+  // Optional: authZ checks (is owner? is listing open? etc.)
 
-    // 2) Return a clean launch URL Unity can open
-    // (The launch route will read the order/action and build the signed form)
-    const baseUrl = process.env.BASE_URL ?? 'http://localhost:3000';
-    const launchUrl = `${baseUrl}/api/payments/launch?orderId=${encodeURIComponent(order.id)}`;
+  const { data, error } = await supabase.from('orders').insert({
+    pet_id: body.petId,
+    action: body.action,
+    status: 'pending',
+    amount: price,
+  }).select('id,status,pet_id,action').single()
 
-    return NextResponse.json({ checkoutUrl: launchUrl, orderId: order.id });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : 'Failed to create order';
-    return NextResponse.json({ error: msg }, { status: 400 });
-  }
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 })
+  return NextResponse.json({ orderId: data.id, status: data.status })
 }
