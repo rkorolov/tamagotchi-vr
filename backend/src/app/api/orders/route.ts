@@ -1,38 +1,55 @@
-import { NextResponse } from 'next/server';
-import { buildHostedCheckoutPayload } from '@/lib/cybersource';
-import { createOrderMock, validateAction } from '@/lib/orderService';
-import type { OrderCreateRequest } from '@/types/dto';
+// src/app/api/orders/route.ts
+export const runtime = 'nodejs';
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
-export async function POST(req: Request) {
-  const body = (await req.json()) as OrderCreateRequest;
-  try {
-    await validateAction(body);
+import { NextRequest, NextResponse } from 'next/server';
+import { getSupabaseServer } from '@/lib/supabaseServer';
+import { v4 as uuidv4 } from 'uuid';
 
-    // TODO: replace with real authenticated user
-    const userId = 'u1';
+type Action = 'heal' | 'revive' | 'buy';
+const ACTION_PRICES: Record<Action, string> = { heal: '1.99', revive: '3.99', buy: '2.99' };
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-    // 1) Create order (DB pending)
-    const order = await createOrderMock(userId, body.petId, body.action);
+export async function POST(req: NextRequest) {
+  const supabase = getSupabaseServer();
 
-    // 2) Build signed payload for Cybersource Hosted Checkout
-    const amount = body.action === 'revive' ? '3.99' : body.action === 'heal' ? '1.99' : '2.99';
-    const payload = buildHostedCheckoutPayload({
-      amount,
-      currency: 'USD',
-      reference: order.id,
-      orderId: order.id,
-    });
+  const body = (await req.json().catch(() => null)) as { petId?: string; action?: Action } | null;
+  const petId = (body?.petId ?? '').trim();
+  const action = body?.action;
 
-    // 3) We’ll return a launch URL that auto-POSTs fields to Cybersource
-    const launchUrl = `${process.env.BASE_URL}/api/payments/launch?orderId=${order.id}`;
-
-    // Store fields server-side (cache/kv/db) for the launch route to render.
-    // For demo simplicity, include in-memory alternative via query (or replace with a KV)
-    // In production, DO NOT send secrets to the client.
-
-    // Return clean URL Unity can open
-    return NextResponse.json({ checkoutUrl: launchUrl, orderId: order.id });
-  } catch (e: any) {
-    return NextResponse.json({ error: e.message || 'Failed to create order' }, { status: 400 });
+  if (!UUID_RE.test(petId) || !action || !(action in ACTION_PRICES)) {
+    return NextResponse.json({ error: 'Bad Request', details: { petId, action } }, { status: 400 });
   }
+
+  // ensure pet exists
+  const { data: pet, error: petErr } = await supabase
+    .from('pets')
+    .select('id')
+    .eq('id', petId)
+    .maybeSingle();
+
+  if (petErr) return NextResponse.json({ error: 'DB_ERROR', message: petErr.message }, { status: 500 });
+  if (!pet)   return NextResponse.json({ error: 'Pet not found', details: { petId } }, { status: 404 });
+
+  const orderId = uuidv4();
+  const amount = ACTION_PRICES[action];
+
+  const { data: order, error } = await supabase
+    .from('orders')
+    .insert({
+      id: orderId,          // ✅ set id explicitly
+      pet_id: petId,
+      action,
+      status: 'pending',
+      amount,               // numeric in Postgres accepts string literals like '1.99'
+    })
+    .select('id,status,pet_id,action')
+    .maybeSingle();
+
+  if (error || !order) {
+    return NextResponse.json({ error: 'Insert failed', message: error?.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ orderId: order.id, status: order.status });
 }

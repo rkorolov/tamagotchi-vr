@@ -1,46 +1,48 @@
 import crypto from 'crypto';
 
+const env = process.env as Record<string, string | undefined>;
+
 const {
-  CYBERSOURCE_MERCHANT_ID,
   CYBERSOURCE_PROFILE_ID,
   CYBERSOURCE_ACCESS_KEY,
   CYBERSOURCE_SECRET_KEY,
   CYBERSOURCE_CHECKOUT_URL,
   BASE_URL,
-} = process.env;
+} = env;
 
-export function requireCybersourceEnv() {
+export function requireCybersourceEnv(): void {
   const missing = [
-    'CYBERSOURCE_MERCHANT_ID',
     'CYBERSOURCE_PROFILE_ID',
     'CYBERSOURCE_ACCESS_KEY',
     'CYBERSOURCE_SECRET_KEY',
     'CYBERSOURCE_CHECKOUT_URL',
     'BASE_URL',
-  ].filter((k) => !process.env[k]);
-  if (missing.length) throw new Error(`Missing env: ${missing.join(', ')}`);
+  ].filter((k) => !env[k]);
+  if (missing.length) {
+    throw new Error(`Missing env: ${missing.join(', ')}`);
+  }
 }
 
-function hmacSha256Base64(data: string, secret: string) {
+function hmacSha256Base64(data: string, secret: string): string {
   return crypto.createHmac('sha256', secret).update(data, 'utf8').digest('base64');
 }
 
 /**
  * Build signed fields for Secure Acceptance Hosted Checkout.
- * For now we return a minimal set; expand as needed.
+ * NOTE: We don't use merchant id for HCO signing; profile/access/secret are sufficient.
  */
 export function buildHostedCheckoutPayload(opts: {
-  amount: string;        // e.g., "1.99"
-  currency: string;      // e.g., "USD"
-  reference: string;     // unique id per order
+  amount: string;     // e.g., "1.99"
+  currency: string;   // e.g., "USD"
+  reference: string;  // unique per order
   orderId: string;
 }) {
   requireCybersourceEnv();
 
-  const access_key = CYBERSOURCE_ACCESS_KEY!;
-  const profile_id = CYBERSOURCE_PROFILE_ID!;
+  const access_key = CYBERSOURCE_ACCESS_KEY as string;
+  const profile_id = CYBERSOURCE_PROFILE_ID as string;
   const transaction_type = 'sale';
-  const signed_date_time = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'); // ISO8601 no ms
+  const signed_date_time = new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'); // strip ms
   const transaction_uuid = crypto.randomUUID();
   const locale = 'en-us';
 
@@ -64,7 +66,7 @@ export function buildHostedCheckoutPayload(opts: {
     'orderId',
   ].join(',');
 
-  const unsigned_field_names = ''; // keep empty for now
+  const unsigned_field_names = '';
 
   const fields: Record<string, string> = {
     access_key,
@@ -80,19 +82,18 @@ export function buildHostedCheckoutPayload(opts: {
     currency: opts.currency,
     override_custom_receipt_page,
     override_custom_cancel_page,
-    orderId: opts.orderId, // custom field we’ll see in webhook/callback
+    orderId: opts.orderId,
   };
 
-  // Signature is HMAC over name=value pairs in signed_field_names order.
   const dataToSign = signed_field_names
     .split(',')
-    .map((name) => `${name}=${fields[name]}`)
+    .map((name: string) => `${name}=${fields[name]}`)
     .join(',');
 
-  const signature = hmacSha256Base64(dataToSign, CYBERSOURCE_SECRET_KEY!);
+  const signature = hmacSha256Base64(dataToSign, CYBERSOURCE_SECRET_KEY as string);
 
   return {
-    formActionUrl: CYBERSOURCE_CHECKOUT_URL!,
+    formActionUrl: CYBERSOURCE_CHECKOUT_URL as string,
     fields: { ...fields, signature },
   };
 }
