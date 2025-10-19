@@ -1,7 +1,11 @@
-import { supabase } from '@/lib/supabaseClient';
+
 import type { OrderDTO, OrderCreateRequest } from '@/types/dto';
+import { get } from 'http';
+import { getSupabaseBrowser } from './supabaseClient';
+import { getSupabaseServer } from './supabaseServer';
 
 export async function validateAction(req: OrderCreateRequest) {
+  const supabase = getSupabaseServer();
   const { data: pet, error } = await supabase
     .from('pets')
     .select('id,state')
@@ -18,6 +22,7 @@ export async function validateAction(req: OrderCreateRequest) {
 
 export async function createOrderMock(userId: string, petId: string, action: OrderDTO['action']): Promise<OrderDTO> {
   // rename later; keeping name so routes work unchanged
+  const supabase = getSupabaseServer();
   const { data, error } = await supabase
     .from('orders')
     .insert({
@@ -36,6 +41,7 @@ export async function createOrderMock(userId: string, petId: string, action: Ord
 }
 
 export async function getOrderMock(id: string) {
+  const supabase = getSupabaseServer();
   const { data } = await supabase.from('orders')
     .select('id,status')
     .eq('id', id)
@@ -44,6 +50,7 @@ export async function getOrderMock(id: string) {
 }
 
 export async function markOrderSucceededMock(id: string) {
+  const supabase = getSupabaseServer();
   const { data } = await supabase.from('orders')
     .update({ status: 'succeeded' })
     .eq('id', id)
