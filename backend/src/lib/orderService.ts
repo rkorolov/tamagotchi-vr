@@ -1,38 +1,53 @@
+import { supabase } from '@/lib/supabaseClient';
 import type { OrderDTO, OrderCreateRequest } from '@/types/dto';
 
-// TODO: replace with real Supabase queries
-const mockPets = [
-  { id: 'p1', name: 'Zuzu', species: 'dog', state: 'sick' as const },
-  { id: 'p2', name: 'Blinky', species: 'blob', state: 'dead' as const },
-  { id: 'p3', name: 'Mochi', species: 'cat', state: 'healthy' as const },
-];
-
-let mockOrders: OrderDTO[] = [];
-
 export async function validateAction(req: OrderCreateRequest) {
-  const pet = mockPets.find((p) => p.id === req.petId);
-  if (!pet) throw new Error('Pet not found');
+  const { data: pet, error } = await supabase
+    .from('pets')
+    .select('id,state')
+    .eq('id', req.petId)
+    .single();
+  if (error || !pet) throw new Error('Pet not found');
 
-  if (req.action === 'heal' && pet.state !== 'sick') throw new Error('Pet must be sick to heal');
-  if (req.action === 'revive' && pet.state !== 'dead') throw new Error('Pet must be dead to revive');
-  if (req.action === 'buy' && pet.state !== 'healthy') throw new Error('Can only buy healthy listings (mock rule)');
+  if (req.action === 'heal'   && pet.state !== 'sick')  throw new Error('Pet must be sick to heal');
+  if (req.action === 'revive' && pet.state !== 'dead')  throw new Error('Pet must be dead to revive');
+  if (req.action === 'buy'    && pet.state !== 'healthy') throw new Error('Pet must be healthy to buy');
 
   return { pet };
 }
 
 export async function createOrderMock(userId: string, petId: string, action: OrderDTO['action']): Promise<OrderDTO> {
-  const id = `ord_${Math.random().toString(36).slice(2, 10)}`;
-  const order: OrderDTO = { id, userId, petId, action, status: 'pending' };
-  mockOrders.push(order);
-  return order;
+  // rename later; keeping name so routes work unchanged
+  const { data, error } = await supabase
+    .from('orders')
+    .insert({
+      user_id: userId,
+      pet_id: petId,
+      action,
+      status: 'pending'
+    })
+    .select('id,user_id,pet_id,action,status')
+    .single();
+  if (error || !data) throw new Error('Failed to create order');
+  return { 
+    id: data.id, userId: data.user_id, petId: data.pet_id, 
+    action: data.action, status: data.status 
+  };
 }
 
 export async function getOrderMock(id: string) {
-  return mockOrders.find((o) => o.id === id) || null;
+  const { data } = await supabase.from('orders')
+    .select('id,status')
+    .eq('id', id)
+    .single();
+  return data ? { id: data.id, status: data.status } : null;
 }
 
 export async function markOrderSucceededMock(id: string) {
-  const o = mockOrders.find((m) => m.id === id);
-  if (o) o.status = 'succeeded';
-  return o;
+  const { data } = await supabase.from('orders')
+    .update({ status: 'succeeded' })
+    .eq('id', id)
+    .select('id,status')
+    .single();
+  return data ? { id: data.id, status: data.status } : null;
 }
